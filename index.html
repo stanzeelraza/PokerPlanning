@@ -270,7 +270,7 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
         </div>
       </div>
       <div class="divider"></div>
-      <button class="reveal-btn" id="revealBtn" onclick="revealVotes()">REVEAL VOTES</button>
+      <button class="reveal-btn" id="revealBtn" onclick="revealVotes()" style="display:none">REVEAL VOTES</button>
       <button class="btn btn-ghost" id="clearBtn" onclick="clearStories()" style="font-size:11px;color:var(--muted);width:100%;display:none">🗑 Clear All Stories</button>
     </div>
   </div>
@@ -359,6 +359,7 @@ function enterApp() {
   if (isHost) {
     document.getElementById('storyAddRow').style.display = 'flex';
     document.getElementById('clearBtn').style.display = 'block';
+    document.getElementById('revealBtn').style.display = 'block';
   }
   renderCards();
 }
@@ -385,6 +386,7 @@ function listenAll() {
     isHost = sess.host === myId;
     document.getElementById('storyAddRow').style.display = isHost ? 'flex' : 'none';
     document.getElementById('clearBtn').style.display = isHost ? 'block' : 'none';
+    document.getElementById('revealBtn').style.display = isHost ? 'block' : 'none';
 
     // Reset UI if story changed
     if (newActive !== activeStoryId) {
@@ -522,6 +524,7 @@ function updateVoteChips(votes) {
 
 // ── REVEAL ──
 window.revealVotes = async function() {
+  if (!isHost) { showToast('Only the host can reveal votes', 'warn'); return; }
   showToast('Revealing votes...', 'ok');
   try {
     await update(ref(db, `sessions/${SESSION_CODE}`), { revealed: true });
@@ -538,8 +541,8 @@ function showResults(votes) {
 
   document.getElementById('resultsPanel').classList.add('show');
   document.getElementById('cardsWrap').style.display = 'none';
-  // Show accept/revote row for everyone
-  document.getElementById('scoreRow').style.display = 'flex';
+  // Only host can accept the final score
+  document.getElementById('scoreRow').style.display = isHost ? 'flex' : 'none';
 
   const nums = entries.map(v => v.value).filter(v => !isNaN(Number(v))).map(Number);
   const min = nums.length ? Math.min(...nums) : null;
