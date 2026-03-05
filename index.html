@@ -376,6 +376,7 @@ function listenAll() {
     updateStats(snap.val() || {});
   });
 
+  // Session state listener
   onValue(ref(db, `sessions/${SESSION_CODE}`), snap => {
     const sess = snap.val(); if (!sess) return;
     const newActive = sess.activeStory || null;
@@ -385,36 +386,54 @@ function listenAll() {
     document.getElementById('storyAddRow').style.display = isHost ? 'flex' : 'none';
     document.getElementById('clearBtn').style.display = isHost ? 'block' : 'none';
 
+    // Reset UI if story changed
     if (newActive !== activeStoryId) {
       activeStoryId = newActive;
       document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
       document.getElementById('resultsPanel').classList.remove('show');
       document.getElementById('scoreRow').style.display = 'none';
       document.getElementById('consensusBox').classList.remove('show');
+      document.getElementById('voteChips').innerHTML = '';
     }
+
+    const wasRevealed = revealed;
     revealed = newRevealed;
 
     if (activeStoryId) {
       document.getElementById('activeWrap').style.display = 'block';
-      document.getElementById('cardsWrap').style.display = newRevealed ? 'none' : 'block';
       document.getElementById('placeholder').style.display = 'none';
+
+      // Get story title
       get(ref(db, `sessions/${SESSION_CODE}/stories/${activeStoryId}`)).then(s => {
         if (s.exists()) document.getElementById('activeTitle').textContent = s.val().text;
       });
+
+      // Fetch votes and render correct view
+      get(ref(db, `sessions/${SESSION_CODE}/votes/${activeStoryId}`)).then(vSnap => {
+        const votes = vSnap.val() || {};
+        updateVoteChips(votes);
+        if (newRevealed) {
+          document.getElementById('cardsWrap').style.display = 'none';
+          showResults(votes);
+        } else {
+          document.getElementById('cardsWrap').style.display = 'block';
+          document.getElementById('resultsPanel').classList.remove('show');
+        }
+      });
+
     } else {
       document.getElementById('activeWrap').style.display = 'none';
       document.getElementById('cardsWrap').style.display = 'none';
     }
-    document.getElementById('revealBtn').disabled = false;
   });
 
+  // Votes listener — live updates as people pick cards
   onValue(ref(db, `sessions/${SESSION_CODE}/votes`), snap => {
     const all = snap.val() || {};
-    if (activeStoryId && all[activeStoryId]) {
-      updateVoteChips(all[activeStoryId]);
-      if (revealed) showResults(all[activeStoryId]);
-    } else {
-      document.getElementById('voteChips').innerHTML = '';
+    const votes = (activeStoryId && all[activeStoryId]) ? all[activeStoryId] : {};
+    updateVoteChips(votes);
+    if (revealed && activeStoryId && all[activeStoryId]) {
+      showResults(all[activeStoryId]);
     }
   });
 }
@@ -438,8 +457,9 @@ function renderStories(stories) {
   c.innerHTML = '';
   entries.forEach(([id,s],i) => {
     const div = document.createElement('div');
-    div.className = 'story-item'+(id===activeStoryId?' active':'')+(s.score!==null?' scored':'');
-    div.innerHTML = `<span class="story-num">#${i+1}</span><span class="story-text">${esc(s.text)}</span><span class="story-pts ${s.score===null?'pending':''}">${s.score!==null?s.score:'—'}</span>${isHost?`<button class="btn btn-danger" data-id="${id}">✕</button>`:''}`;
+    const scored = s.score !== null && s.score !== undefined;
+    div.className = 'story-item'+(id===activeStoryId?' active':'')+(scored?' scored':'');
+    div.innerHTML = `<span class="story-num">#${i+1}</span><span class="story-text">${esc(s.text)}</span><span class="story-pts ${scored?'':'pending'}">${scored?s.score:'—'}</span>${isHost?`<button class="btn btn-danger" data-id="${id}">✕</button>`:''}`;
     div.addEventListener('click', e => {
       if (e.target.classList.contains('btn-danger')) removeStory(e.target.dataset.id);
       else if (isHost) activateStory(id);
@@ -513,31 +533,53 @@ window.revealVotes = async function() {
 };
 
 function showResults(votes) {
-  const entries = Object.values(votes); if (!entries.length) return;
+  const entries = Object.values(votes);
+  if (!entries.length) { showToast('No votes yet!', 'warn'); return; }
+
   document.getElementById('resultsPanel').classList.add('show');
   document.getElementById('cardsWrap').style.display = 'none';
-  document.getElementById('scoreRow').style.display = isHost ? 'flex' : 'none';
+  // Show accept/revote row for everyone
+  document.getElementById('scoreRow').style.display = 'flex';
 
-  const nums = entries.map(v=>v.value).filter(v=>!isNaN(v)).map(Number);
-  const min = nums.length?Math.min(...nums):null, max = nums.length?Math.max(...nums):null;
-  const avg = nums.length?nums.reduce((a,b)=>a+b,0)/nums.length:null;
-  const allSame = entries.length>1 && entries.every(v=>v.value===entries[0].value);
+  const nums = entries.map(v => v.value).filter(v => !isNaN(Number(v))).map(Number);
+  const min = nums.length ? Math.min(...nums) : null;
+  const max = nums.length ? Math.max(...nums) : null;
+  const avg = nums.length ? nums.reduce((a,b) => a+b, 0) / nums.length : null;
+  const allSame = entries.length >= 1 && entries.every(v => String(v.value) === String(entries[0].value));
 
+  // Render vote cards
   const grid = document.getElementById('votesGrid');
   grid.innerHTML = '';
-  Object.entries(votes).forEach(([,v]) => {
+  Object.entries(votes).forEach(([, v]) => {
+    const isHigh = nums.length > 1 && Number(v.value) === max && max !== min;
+    const isLow  = nums.length > 1 && Number(v.value) === min && max !== min;
     const d = document.createElement('div');
-    d.className = 'rv-card'+(allSame?' consensus':nums.length&&Number(v.value)===max&&max!==min?' high':nums.length&&Number(v.value)===min&&max!==min?' low':'');
+    d.className = 'rv-card' + (allSame && entries.length > 1 ? ' consensus' : isHigh ? ' high' : isLow ? ' low' : '');
     d.innerHTML = `<div class="rv-name">${esc(v.name)}</div><div class="rv-val">${v.value}</div>`;
     grid.appendChild(d);
   });
 
-  document.getElementById('statsRow').innerHTML = nums.length>1
-    ? `<span>MIN:<strong>${min}</strong></span><span>MAX:<strong>${max}</strong></span><span>AVG:<strong>${avg.toFixed(1)}</strong></span><span>SPREAD:<strong style="color:${max-min>5?'var(--red)':'var(--green)'}">${max-min}</strong></span>` : '';
+  // Stats — show for any number of votes
+  if (nums.length >= 1) {
+    const spread = nums.length > 1 ? max - min : 0;
+    document.getElementById('statsRow').innerHTML =
+      `<span>MIN: <strong>${min}</strong></span>` +
+      `<span>MAX: <strong>${max}</strong></span>` +
+      `<span>AVG: <strong>${avg.toFixed(1)}</strong></span>` +
+      (nums.length > 1 ? `<span>SPREAD: <strong style="color:${spread>5?'var(--red)':'var(--green)'}">${spread}</strong></span>` : '');
+  } else {
+    document.getElementById('statsRow').innerHTML = '';
+  }
 
-  document.getElementById('consensusBox').classList.toggle('show', allSame && entries.length>1);
-  if (allSame) document.getElementById('consensusNum').textContent = entries[0].value;
-  if (avg!==null) document.getElementById('finalScore').value = allSame ? entries[0].value : closestFib(Math.round(avg));
+  // Consensus banner
+  const showConsensus = allSame && entries.length > 1;
+  document.getElementById('consensusBox').classList.toggle('show', showConsensus);
+  if (showConsensus) document.getElementById('consensusNum').textContent = entries[0].value;
+
+  // Suggest final score
+  if (avg !== null) {
+    document.getElementById('finalScore').value = allSame ? entries[0].value : closestFib(Math.round(avg));
+  }
 }
 
 window.acceptScore = async function() {
