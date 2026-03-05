@@ -405,7 +405,7 @@ function listenAll() {
       document.getElementById('activeWrap').style.display = 'none';
       document.getElementById('cardsWrap').style.display = 'none';
     }
-    document.getElementById('revealBtn').disabled = !isHost || !activeStoryId || newRevealed;
+    document.getElementById('revealBtn').disabled = !activeStoryId || newRevealed;
   });
 
   onValue(ref(db, `sessions/${SESSION_CODE}/votes`), snap => {
@@ -496,13 +496,13 @@ function updateVoteChips(votes) {
     const vc = votes ? Object.keys(votes).length : 0;
     const total = Object.keys(players).length;
     document.getElementById('activeMeta').textContent = `${vc} of ${total} voted`;
-    if (isHost && vc>0 && vc>=total && !revealed) document.getElementById('revealBtn').disabled = false;
+    if (vc>0 && vc>=total && !revealed) document.getElementById('revealBtn').disabled = false;
   });
 }
 
 // ── REVEAL ──
 window.revealVotes = async function() {
-  if (!isHost || !activeStoryId) return;
+  if (!activeStoryId) { showToast('Select a story first!', 'warn'); return; }
   await update(ref(db, `sessions/${SESSION_CODE}`), { revealed: true });
 };
 
@@ -510,7 +510,7 @@ function showResults(votes) {
   const entries = Object.values(votes); if (!entries.length) return;
   document.getElementById('resultsPanel').classList.add('show');
   document.getElementById('cardsWrap').style.display = 'none';
-  if (isHost) document.getElementById('scoreRow').style.display = 'flex';
+  document.getElementById('scoreRow').style.display = isHost ? 'flex' : 'none';
 
   const nums = entries.map(v=>v.value).filter(v=>!isNaN(v)).map(Number);
   const min = nums.length?Math.min(...nums):null, max = nums.length?Math.max(...nums):null;
